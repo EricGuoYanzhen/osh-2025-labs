@@ -11,6 +11,8 @@ AI给我的对于大小的影响排序如下：
 8. **Memory Management options**
 9. **Processor type and features**
 
+---
+
 我个人感觉比较占地方的是：
 1. **调试相关的，这个我感觉最占地方**
 2. **网络**
