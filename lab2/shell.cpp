@@ -24,6 +24,26 @@ int main()
     std::string cmd;
     while (true)
     {
+        // 显示当前工作目录(自用)，将家目录替换为 ~
+        char pwd[PATH_MAX];
+        if (getcwd(pwd, sizeof(pwd)))
+        {
+            std::string cwd_str = pwd;
+            const char* home = getenv("HOME");
+            if (home && cwd_str.find(home) == 0)
+            {
+            std::cout << "~" << cwd_str.substr(std::string(home).length());
+            }
+            else
+            {
+            std::cout << cwd_str;
+            }
+        }
+        else
+        {
+            std::cout << "getcwd failed\n";
+        }
+
         // 打印提示符
         std::cout << "$ ";
 
@@ -64,13 +84,62 @@ int main()
 
         if (args[0] == "pwd")
         {
-            std::cout << "To be done!\n";
+            char buf[PATH_MAX];
+            if (getcwd(buf, sizeof(buf)) != nullptr)
+            {
+                std::cout << buf << "\n";
+            }
+            else
+            {
+                std::cout << "pwd failed\n";
+            }
             continue;
         }
 
         if (args[0] == "cd")
         {
-            std::cout << "To be done!\n";
+            static std::string prev_dir; // 保存上一次目录
+            char cwd[PATH_MAX];
+            if (!getcwd(cwd, sizeof(cwd)))
+            {
+                std::cout << "getcwd failed\n";
+                continue;
+            }
+
+            std::string target_dir;
+            if (args.size() == 1)
+            {
+                // 没有参数，进入家目录
+                char *home = getenv("HOME");
+                if (!home)
+                {
+                    std::cout << "No HOME env\n";
+                    continue;
+                }
+                target_dir = home;
+            }
+            else if (args[1] == "-")
+            {
+                // cd - 切换到上一次目录
+                if (prev_dir.empty())
+                {
+                    std::cout << "No previous directory\n";
+                    continue;
+                }
+                target_dir = prev_dir;
+            }
+            else
+            {
+                target_dir = args[1];
+            }
+
+            if (chdir(target_dir.c_str()) != 0)
+            {
+                std::cout << "cd failed\n";
+                continue;
+            }
+
+            prev_dir = cwd; // 更新上一次目录
             continue;
         }
 
