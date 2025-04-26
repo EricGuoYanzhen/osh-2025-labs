@@ -14,21 +14,66 @@
 #include <sys/wait.h>
 // open/close
 #include <fcntl.h>
+// signal
+#include <signal.h>
+#include <termios.h>
+#include <sys/types.h>
+#include <unistd.h>
+#include <cstdio>
 
 std::vector<std::string> split(std::string s, const std::string &delimiter);
-
-// 辅助函数：处理重定向，修改参数列表，返回是否成功
 bool handle_redirection(std::vector<std::string> &args);
+
+// 全局变量，保存 shell 的 pgid 和终端 fd
+pid_t shell_pgid;
+int shell_terminal;
+struct termios shell_tmodes;
+
+// 信号处理函数：用于丢弃当前输入
+volatile sig_atomic_t sigint_received = 0;
+void sigint_handler(int signo)
+{
+    // 仅设置标志位，不做复杂操作
+    sigint_received = 1;
+    // 输出换行和提示符
+    write(STDOUT_FILENO, "\n$ ", 3);
+}
 
 int main()
 {
     // 不同步 iostream 和 cstdio 的 buffer
     std::ios::sync_with_stdio(false);
 
+    // 初始化 shell 进程组和终端
+    shell_terminal = STDIN_FILENO;
+    shell_pgid = getpid();
+    // 让 shell 成为自己的进程组长
+    setpgid(shell_pgid, shell_pgid);
+    // 把 shell 进程组设置为前台
+    tcsetpgrp(shell_terminal, shell_pgid);
+    // 保存终端属性
+    tcgetattr(shell_terminal, &shell_tmodes);
+
+    // 安装 SIGINT 处理器
+    struct sigaction sa;
+    sa.sa_handler = sigint_handler;
+    sigemptyset(&sa.sa_mask);
+    sa.sa_flags = SA_RESTART;
+    sigaction(SIGINT, &sa, nullptr);
+
+    // 忽略 SIGTTOU，防止 tcsetpgrp 时被挂起
+    signal(SIGTTOU, SIG_IGN);
+
     // 用来存储读入的一行命令
     std::string cmd;
     while (true)
     {
+        // 检查 sigint_received，若收到 Ctrl-C，丢弃当前输入
+        if (sigint_received)
+        {
+            sigint_received = 0;
+            continue;
+        }
         // // 显示当前工作目录(自用)，将家目录替换为 ~
         // char pwd[PATH_MAX];
         // if (getcwd(pwd, sizeof(pwd)))
@@ -55,6 +100,12 @@ int main()
         // 读入一行。std::getline 结果不包含换行符。
         std::getline(std::cin, cmd);
 
+        // 若输入被 Ctrl-C 打断，std::getline 会设置 failbit
+        if (std::cin.fail())
+        {
+            std::cin.clear();
+            continue;
+        }
         // 检查是否有管道
         if (cmd.find("|") != std::string::npos)
         {
@@ -229,6 +280,14 @@ int main()
         if (pid == 0)
         {
             // 这里只有子进程才会进入
+            // 子进程：设置为新进程组
+            setpgid(0, 0);
+            // 把自己设置为前台进程组
+            tcsetpgrp(shell_terminal, getpid());
+            // 恢复默认 SIGINT 行为
+            signal(SIGINT, SIG_DFL);
+            signal(SIGTTOU, SIG_DFL);
+
             // 处理重定向
             if (!handle_redirection(args))
             {
@@ -252,12 +311,17 @@ int main()
             exit(255);
         }
 
-        // 这里只有父进程（原进程）才会进入
-        int ret = wait(nullptr);
-        if (ret < 0)
-        {
-            std::cout << "wait failed";
-        }
+        // 父进程：将子进程组设置为前台
+        setpgid(pid, pid);
+        tcsetpgrp(shell_terminal, pid);
+
+        int status = 0;
+        waitpid(pid, &status, 0);
+
+        // 恢复 shell 为前台
+        tcsetpgrp(shell_terminal, shell_pgid);
+        // 恢复终端属性
+        tcgetattr(shell_terminal, &shell_tmodes);
     }
 }
 
@@ -283,6 +347,7 @@ std::vector<std::string> split(std::string s, const std::string &delimiter)
     return res;
 }
 
+// 辅助函数：处理重定向，修改参数列表，返回是否成功
 bool handle_redirection(std::vector<std::string> &args)
 {
     for (size_t i = 0; i < args.size();)
