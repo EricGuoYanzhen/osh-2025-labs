@@ -44,6 +44,9 @@ int main()
     // 不同步 iostream 和 cstdio 的 buffer
     std::ios::sync_with_stdio(false);
 
+    // 命令历史
+    std::vector<std::string> history;
+
     // 初始化 shell 进程组和终端
     shell_terminal = STDIN_FILENO;
     shell_pgid = getpid();
@@ -100,12 +103,97 @@ int main()
         // 读入一行。std::getline 结果不包含换行符。
         std::getline(std::cin, cmd);
 
+        // 检查 EOF（如 Ctrl-D），退出 shell
+        if (std::cin.eof())
+        {
+            std::cout << "\n";
+            break;
+        }
+
         // 若输入被 Ctrl-C 打断，std::getline 会设置 failbit
         if (std::cin.fail())
         {
             std::cin.clear();
             continue;
         }
+
+        // 去除前后空白
+        size_t first = cmd.find_first_not_of(" \t\r\n");
+        size_t last = cmd.find_last_not_of(" \t\r\n");
+        std::string trimmed_cmd = (first == std::string::npos) ? "" : cmd.substr(first, last - first + 1);
+
+        // 处理 !! 和 !n
+        bool is_bang = false;
+        std::string bang_cmd;
+        if (trimmed_cmd == "!!")
+        {
+            if (history.empty())
+            {
+                std::cout << "No commands in history\n";
+                continue;
+            }
+            bang_cmd = history.back();
+            std::cout << bang_cmd << std::endl;
+            is_bang = true;
+        }
+        else if (trimmed_cmd.size() > 1 && trimmed_cmd[0] == '!' && isdigit(trimmed_cmd[1]))
+        {
+            int idx = std::stoi(trimmed_cmd.substr(1));
+            if (idx < 1 || idx > (int)history.size())
+            {
+                std::cout << "No such command in history\n";
+                continue;
+            }
+            bang_cmd = history[idx - 1];
+            std::cout << bang_cmd << std::endl;
+            is_bang = true;
+        }
+
+        if (is_bang)
+        {
+            trimmed_cmd = bang_cmd;
+            // !!和!n不加入历史，直接goto重新处理
+            // 这里用continue会重新进入while循环，重新处理trimmed_cmd
+            cmd = trimmed_cmd;
+            // 重新去除前后空白
+            size_t first2 = cmd.find_first_not_of(" \t\r\n");
+            size_t last2 = cmd.find_last_not_of(" \t\r\n");
+            trimmed_cmd = (first2 == std::string::npos) ? "" : cmd.substr(first2, last2 - first2 + 1);
+            // 继续往下走，不加入历史
+        }
+        else
+        {
+            // 非空命令加入历史（!!和!n不加入，history要加入）
+            if (!trimmed_cmd.empty())
+            {
+                history.push_back(trimmed_cmd);
+            }
+        }
+
+        // history n 命令
+        if (trimmed_cmd.substr(0, 7) == "history")
+        {
+            int n = history.size();
+            // 解析 history n
+            std::istringstream iss(trimmed_cmd);
+            std::string tmp;
+            iss >> tmp; // 跳过 history
+            if (iss >> n)
+            {
+                if (n > (int)history.size())
+                    n = history.size();
+            }
+            // 输出格式与 bash 类似
+            int start = history.size() - n;
+            if (start < 0)
+                start = 0;
+            for (int i = start; i < (int)history.size(); ++i)
+            {
+                std::cout << "  " << i + 1 << "  " << history[i] << "\n";
+            }
+            continue;
+        }
+
         // 检查是否有管道
         if (cmd.find("|") != std::string::npos)
         {
