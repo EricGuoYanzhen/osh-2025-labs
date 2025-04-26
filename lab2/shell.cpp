@@ -12,8 +12,13 @@
 #include <unistd.h>
 // wait
 #include <sys/wait.h>
+// open/close
+#include <fcntl.h>
 
 std::vector<std::string> split(std::string s, const std::string &delimiter);
+
+// 辅助函数：处理重定向，修改参数列表，返回是否成功
+bool handle_redirection(std::vector<std::string> &args);
 
 int main()
 {
@@ -95,6 +100,11 @@ int main()
                     {
                         close(pipes[j][0]);
                         close(pipes[j][1]);
+                    }
+                    // 处理重定向
+                    if (!handle_redirection(args))
+                    {
+                        exit(1);
                     }
                     // 构造参数
                     std::vector<char *> argv;
@@ -216,18 +226,24 @@ int main()
         // 处理外部命令
         pid_t pid = fork();
 
-        // std::vector<std::string> 转 char **
-        char *arg_ptrs[args.size() + 1];
-        for (auto i = 0; i < args.size(); i++)
-        {
-            arg_ptrs[i] = &args[i][0];
-        }
-        // exec p 系列的 argv 需要以 nullptr 结尾
-        arg_ptrs[args.size()] = nullptr;
-
         if (pid == 0)
         {
             // 这里只有子进程才会进入
+            // 处理重定向
+            if (!handle_redirection(args))
+            {
+                exit(1);
+            }
+
+            // std::vector<std::string> 转 char **
+            char *arg_ptrs[args.size() + 1];
+            for (auto i = 0; i < args.size(); i++)
+            {
+                arg_ptrs[i] = &args[i][0];
+            }
+            // exec p 系列的 argv 需要以 nullptr 结尾
+            arg_ptrs[args.size()] = nullptr;
+
             // execvp 会完全更换子进程接下来的代码，所以正常情况下 execvp 之后这里的代码就没意义了
             // 如果 execvp 之后的代码被运行了，那就是 execvp 出问题了
             execvp(args[0].c_str(), arg_ptrs);
@@ -265,4 +281,55 @@ std::vector<std::string> split(std::string s, const std::string &delimiter)
     }
     res.push_back(s);
     return res;
+}
+
+bool handle_redirection(std::vector<std::string> &args)
+{
+    for (size_t i = 0; i < args.size();)
+    {
+        if ((args[i] == ">" || args[i] == ">>" || args[i] == "<") && i + 1 < args.size())
+        {
+            int fd = -1;
+            if (args[i] == ">")
+            {
+                fd = open(args[i + 1].c_str(), O_WRONLY | O_CREAT | O_TRUNC, 0666);
+                if (fd < 0)
+                {
+                    perror("open >");
+                    return false;
+                }
+                dup2(fd, STDOUT_FILENO);
+                close(fd);
+            }
+            else if (args[i] == ">>")
+            {
+                fd = open(args[i + 1].c_str(), O_WRONLY | O_CREAT | O_APPEND, 0666);
+                if (fd < 0)
+                {
+                    perror("open >>");
+                    return false;
+                }
+                dup2(fd, STDOUT_FILENO);
+                close(fd);
+            }
+            else if (args[i] == "<")
+            {
+                fd = open(args[i + 1].c_str(), O_RDONLY);
+                if (fd < 0)
+                {
+                    perror("open <");
+                    return false;
+                }
+                dup2(fd, STDIN_FILENO);
+                close(fd);
+            }
+            // 移除重定向符及文件名
+            args.erase(args.begin() + i, args.begin() + i + 2);
+        }
+        else
+        {
+            ++i;
+        }
+    }
+    return true;
 }
