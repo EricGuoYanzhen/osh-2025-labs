@@ -24,31 +24,100 @@ int main()
     std::string cmd;
     while (true)
     {
-        // 显示当前工作目录(自用)，将家目录替换为 ~
-        char pwd[PATH_MAX];
-        if (getcwd(pwd, sizeof(pwd)))
-        {
-            std::string cwd_str = pwd;
-            const char* home = getenv("HOME");
-            if (home && cwd_str.find(home) == 0)
-            {
-            std::cout << "~" << cwd_str.substr(std::string(home).length());
-            }
-            else
-            {
-            std::cout << cwd_str;
-            }
-        }
-        else
-        {
-            std::cout << "getcwd failed\n";
-        }
+        // // 显示当前工作目录(自用)，将家目录替换为 ~
+        // char pwd[PATH_MAX];
+        // if (getcwd(pwd, sizeof(pwd)))
+        // {
+        //     std::string cwd_str = pwd;
+        //     const char *home = getenv("HOME");
+        //     if (home && cwd_str.find(home) == 0)
+        //     {
+        //         std::cout << "~" << cwd_str.substr(std::string(home).length());
+        //     }
+        //     else
+        //     {
+        //         std::cout << cwd_str;
+        //     }
+        // }
+        // else
+        // {
+        //     std::cout << "getcwd failed\n";
+        // }
 
         // 打印提示符
         std::cout << "$ ";
 
         // 读入一行。std::getline 结果不包含换行符。
         std::getline(std::cin, cmd);
+
+        // 检查是否有管道
+        if (cmd.find("|") != std::string::npos)
+        {
+            // 先用 | 分割命令，每段再按空格分割
+            std::vector<std::string> pipe_cmds = split(cmd, " | ");
+            int n = pipe_cmds.size();
+            std::vector<int[2]> pipes(n - 1);
+
+            // 创建需要的管道
+            for (int i = 0; i < n - 1; ++i)
+            {
+                if (pipe(pipes[i]) < 0)
+                {
+                    std::cout << "pipe failed\n";
+                    goto wait_pipe_child;
+                }
+            }
+
+            for (int i = 0; i < n; ++i)
+            {
+                std::vector<std::string> args = split(pipe_cmds[i], " ");
+                if (args.empty())
+                    continue;
+                pid_t pid = fork();
+                if (pid < 0)
+                {
+                    std::cout << "fork failed\n";
+                    goto wait_pipe_child;
+                }
+                if (pid == 0)
+                {
+                    // 子进程
+                    if (i > 0)
+                    {
+                        dup2(pipes[i - 1][0], 0); // 前一个管道的读端作为输入
+                    }
+                    if (i < n - 1)
+                    {
+                        dup2(pipes[i][1], 1); // 当前管道的写端作为输出
+                    }
+                    // 关闭所有管道
+                    for (int j = 0; j < n - 1; ++j)
+                    {
+                        close(pipes[j][0]);
+                        close(pipes[j][1]);
+                    }
+                    // 构造参数
+                    std::vector<char *> argv;
+                    for (auto &s : args)
+                        argv.push_back(&s[0]);
+                    argv.push_back(nullptr);
+                    execvp(argv[0], argv.data());
+                    std::cout << "exec failed\n";
+                    exit(255);
+                }
+            }
+            // 父进程关闭所有管道
+            for (int i = 0; i < n - 1; ++i)
+            {
+                close(pipes[i][0]);
+                close(pipes[i][1]);
+            }
+        wait_pipe_child:
+            // 等待所有子进程
+            for (int i = 0; i < n; ++i)
+                wait(nullptr);
+            continue;
+        }
 
         // 按空格分割命令为单词
         std::vector<std::string> args = split(cmd, " ");
@@ -133,8 +202,9 @@ int main()
                 target_dir = args[1];
             }
 
-            if (chdir(target_dir.c_str()) != 0)
+            if (chdir(target_dir.c_str()) != 0) // 调用 chdir 切换目录
             {
+                // 切换失败
                 std::cout << "cd failed\n";
                 continue;
             }
@@ -175,13 +245,18 @@ int main()
     }
 }
 
-// 经典的 cpp string split 实现
-// https://stackoverflow.com/a/14266139/11691878
+// 改进 split 函数，支持跳过前导空白
 std::vector<std::string> split(std::string s, const std::string &delimiter)
 {
     std::vector<std::string> res;
     size_t pos = 0;
     std::string token;
+    // 跳过前导空白
+    while (pos < s.size() && isspace(s[pos]))
+    {
+        ++pos;
+    }
+
     while ((pos = s.find(delimiter)) != std::string::npos)
     {
         token = s.substr(0, pos);
