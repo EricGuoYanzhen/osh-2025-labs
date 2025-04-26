@@ -20,6 +20,9 @@
 #include <sys/types.h>
 #include <unistd.h>
 #include <cstdio>
+// time
+#include <ctime>
+#include <iomanip>
 
 std::vector<std::string> split(std::string s, const std::string &delimiter);
 bool handle_redirection(std::vector<std::string> &args);
@@ -362,6 +365,21 @@ int main()
             continue;
         }
 
+        // 检查 time 命令
+        bool is_time = false;
+        struct timespec ts_start, ts_end;
+        if (!args.empty() && args[0] == "time")
+        {
+            is_time = true;
+            args.erase(args.begin()); // 移除 time
+            if (args.empty())
+            {
+                std::cout << "time: missing command\n";
+                continue;
+            }
+            clock_gettime(CLOCK_MONOTONIC, &ts_start);
+        }
+
         // 处理外部命令
         pid_t pid = fork();
 
@@ -410,6 +428,14 @@ int main()
         tcsetpgrp(shell_terminal, shell_pgid);
         // 恢复终端属性
         tcgetattr(shell_terminal, &shell_tmodes);
+
+        // 输出 time 统计
+        if (is_time)
+        {
+            clock_gettime(CLOCK_MONOTONIC, &ts_end);
+            double elapsed = (ts_end.tv_sec - ts_start.tv_sec) + (ts_end.tv_nsec - ts_start.tv_nsec) / 1e9;
+            std::cout << args[0] << "    " << std::fixed << std::setprecision(2) << elapsed << "s\n";
+        }
     }
 }
 

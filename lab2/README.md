@@ -31,3 +31,13 @@
 
 - `Ctrl-C` 信号处理  
   添加信号处理，以及 `SIGINT` 的识别
+
+## Task 5
+
+To be done.
+
+## 拓展功能
+
+- 支持 `history` 但不支持上下键切换
+- 支持 `Ctrl-D` 功能
+- 支持 `time` 命令
